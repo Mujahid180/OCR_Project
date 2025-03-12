@@ -1,0 +1,203 @@
+import sys
+from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QPushButton, QFileDialog, QTextEdit, QVBoxLayout, QMessageBox, QFrame
+from PyQt6.QtGui import QPixmap, QDragEnterEvent, QDropEvent
+from PyQt6.QtCore import Qt
+import cv2
+import numpy as np
+import easyocr
+from langdetect import detect
+import openai
+from ocr_processor import process_image, analyze_historical_period
+
+# Set your OpenAI API key
+openai.api_key = "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"  # Replace with your actual API key
+
+reader = easyocr.Reader(["hi", "en"], gpu=False, model_storage_directory="C:/Users/ameen/.EasyOCR/model/", download_enabled=True)
+
+class OCRApp(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle("AI-Powered OCR for Historical Documents")
+        self.setGeometry(100, 100, 600, 500)
+        self.setAcceptDrops(True)  # Enable drag-and-drop functionality
+
+        self.label = QLabel("Upload or Drag an Image", self)
+        self.label.setStyleSheet("font-size: 16px; font-weight: bold;")
+
+        self.image_label = QLabel(self)
+        self.image_label.setFixedSize(300, 300)
+        self.image_label.setFrameShape(QFrame.Shape.Box)
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.text_edit = QTextEdit(self)
+        self.text_edit.setPlaceholderText("Extracted text will appear here...")
+
+        self.upload_btn = QPushButton("Upload Image", self)
+        self.upload_btn.clicked.connect(self.upload_image)
+
+        self.process_btn = QPushButton("Process OCR", self)
+        self.process_btn.clicked.connect(self.process_ocr)
+        self.process_btn.setEnabled(False)
+
+        self.save_btn = QPushButton("Save Text", self)
+        self.save_btn.clicked.connect(self.save_text)
+        self.save_btn.setEnabled(False)
+
+        self.analyze_btn = QPushButton("Analyze Historical Period", self)
+        self.analyze_btn.clicked.connect(self.analyze_period)
+        self.analyze_btn.setEnabled(False)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.label)
+        layout.addWidget(self.image_label)
+        layout.addWidget(self.upload_btn)
+        layout.addWidget(self.process_btn)
+        layout.addWidget(self.text_edit)
+        layout.addWidget(self.analyze_btn)
+        layout.addWidget(self.save_btn)
+
+        self.setLayout(layout)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent):
+        urls = event.mimeData().urls()
+        if urls:
+            self.image_path = urls[0].toLocalFile()
+            self.image_label.setPixmap(QPixmap(self.image_path).scaled(300, 300))
+            self.process_btn.setEnabled(True)
+
+    def upload_image(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp)")
+        if file_path:
+            self.image_label.setPixmap(QPixmap(file_path).scaled(300, 300))
+            self.image_path = file_path
+            self.process_btn.setEnabled(True)
+
+    def process_ocr(self):
+        if hasattr(self, 'image_path'):
+            extracted_text = process_image(self.image_path)
+            if extracted_text:
+                self.text_edit.setPlainText(extracted_text)
+                self.save_btn.setEnabled(True)
+                self.analyze_btn.setEnabled(True)
+            else:
+                QMessageBox.warning(self, "OCR Failed", "No text detected. Try another image.")
+
+    def analyze_period(self):
+        text = self.text_edit.toPlainText()
+        if text:
+            historical_period = analyze_historical_period(text)
+            self.text_edit.append(f"\n\n[Historical Analysis]\n{historical_period}")
+        else:
+            QMessageBox.warning(self, "Analysis Failed", "No text available for analysis.")
+
+    def save_text(self):
+        text = self.text_edit.toPlainText()
+        if text:
+            file_path, _ = QFileDialog.getSaveFileName(self, "Save Text", "", "Text Files (*.txt)")
+            if file_path:
+                with open(file_path, "w", encoding="utf-8") as file:
+                    file.write(text)
+                QMessageBox.information(self, "Success", "Text saved successfully.")
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = OCRApp()
+    window.show()
+    sys.exit(app.exec())
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import cv2
+import numpy as np
+import easyocr
+import openai
+from dotenv import load_dotenv
+import os
+
+reader = easyocr.Reader(["hi", "en"], gpu=False, model_storage_directory="C:/Users/ameen/.EasyOCR/model/", download_enabled=True)
+
+load_dotenv()
+openai.api_key = os.getenv("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")
+
+def preprocess_image(image_path):
+    image = cv2.imread(image_path)
+    if image is None:
+        return None
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    denoised = cv2.fastNlMeansDenoising(gray, h=30)
+    thresh = cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 2)
+    kernel = np.ones((1, 1), np.uint8)
+    processed_image = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    return processed_image
+
+def process_image(image_path):
+    try:
+        processed_image = preprocess_image(image_path)
+        if processed_image is None:
+            return "Error: Unable to read image file."
+        detected_text = reader.readtext(image_path, detail=0)
+        return "\n".join(detected_text) if detected_text else "No text detected."
+    except Exception as e:
+        return f"OCR Failed: {str(e)}"
+
+
+
+def analyze_historical_period(text):
+    try:
+        client = openai.OpenAI(api_key=openai.api_key)  # Ensure the API key is passed here
+        # response = client.chat.completions.create(
+        #     model="gpt-4",
+        #     messages=[
+        #         {"role": "system", "content": "You are an AI trained to analyze historical texts and determine their approximate historical period based on linguistic style and content."},
+        #         {"role": "user", "content": f"Analyze the historical period of this text:\n{text}"},
+        #     ]
+        # )
+        response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",  # Use this if GPT-4 is not available
+        messages=[{"role": "user", "content": text}],
+        # api_key=api_key
+)
+
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error analyzing historical period: {str(e)}"
+    
+# def analyze_historical_period(text):
+#     try:
+#         client = openai.OpenAI()
+#         response = client.chat.completions.create(
+#             model="gpt-4",
+#             messages=[
+#                 {"role": "system", "content": "You are an AI trained to analyze historical texts and determine their approximate historical period based on linguistic style and content."},
+#                 {"role": "user", "content": f"Analyze the historical period of this text:\n{text}"},
+#             ]
+#         )
+#         return response.choices[0].message.content
+#     except Exception as e:
+#         return f"Error analyzing historical period: {str(e)}"
+
+
+
+key.env
+OPENAI_API_KEY=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
+
